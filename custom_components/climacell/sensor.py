@@ -89,23 +89,17 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     }
 )
 
-
 def setup_platform(hass, config, add_entities, discovery_info=None):
     """Set up the Climacell sensor."""
     _LOGGER.info(
         "__init__ setup_platform 'sensor' start for %s with config %s.", DOMAIN, config
     )
 
-    # realtime_conf = None
-    # realtime_interval = None
-    # realtime_exclude = None
-
-    sensor_friendly_name = config.get(CONF_NAME, DEFAULT_NAME.lower())
-    latitude = config.get(CONF_LATITUDE, hass.config.latitude)
-    longitude = config.get(CONF_LONGITUDE, hass.config.longitude)
-    timezone = hass.config.time_zone
-
     _LOGGER.info("__init__ setup_platform 'sensor' start for %s.", DOMAIN)
+
+    sensor_friendly_name = config.setdefault(CONF_NAME, DEFAULT_NAME.lower())
+    config.setdefault(CONF_LATITUDE, hass.config.latitude)
+    config.setdefault(CONF_LONGITUDE, hass.config.longitude)
 
     if CONF_UNITS in config:
         units = config[CONF_UNITS]
@@ -118,6 +112,8 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
         units = CONF_ALLOWED_UNITS[0]
     elif units == CONF_LEGACY_UNITS[1]:
         units = CONF_ALLOWED_UNITS[1]
+        
+    config[CONF_UNITS] = units
 
     LEGACY_CONF_TIMESTEPS = {
         CONF_REALTIME: "1m",
@@ -126,8 +122,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
         CONF_NOWCAST: "5m",
     }
 
-    if CONF_TIMELINES not in config:
-        config[CONF_TIMELINES] = []
+    config.setdefault(CONF_TIMELINES,[])
 
     if CONF_MONITORED_CONDITIONS in config:
         for key in LEGACY_CONF_TIMESTEPS:
@@ -141,16 +136,8 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
                     if CONF_FORECAST_OBSERVATIONS in leg_conf
                     else default_observations
                 )
-                leg_interval = (
-                    leg_conf[CONF_SCAN_INTERVAL]
-                    if CONF_SCAN_INTERVAL in leg_conf
-                    else DEFAULT_SCAN_INTERVAL
-                )
-                leg_exclude = (
-                    leg_conf[CONF_EXCLUDE_INTERVAL]
-                    if CONF_EXCLUDE_INTERVAL in leg_conf
-                    else None
-                )
+                leg_interval = leg_conf.get(CONF_SCAN_INTERVAL,DEFAULT_SCAN_INTERVAL)
+                leg_exclude = leg_conf.get(CONF_EXCLUDE_INTERVAL,None)
                 leg_update = (
                     leg_conf[CONF_UPDATE][0] if CONF_UPDATE in leg_conf else ATTR_AUTO
                 )
@@ -172,47 +159,36 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
                         CONF_START_TIME: 0,
                     }
                 ]
-
+        config.pop(CONF_MONITORED_CONDITIONS)
+    
     sensors = []
 
     for timeline_spec in config[CONF_TIMELINES]:
-        interval = (
-            timeline_spec[CONF_SCAN_INTERVAL]
-            if CONF_SCAN_INTERVAL in timeline_spec
-            else DEFAULT_SCAN_INTERVAL
-        )
-        fields = timeline_spec[CONF_FIELDS] if CONF_FIELDS in timeline_spec else []
-        start_time = (
-            timeline_spec[CONF_START_TIME] if CONF_START_TIME in timeline_spec else 0
-        )
-        observations = (
-            int(timeline_spec[CONF_FORECAST_OBSERVATIONS])
-            if CONF_FORECAST_OBSERVATIONS in timeline_spec
-            else 1
-        )
-        timestep = (
-            timeline_spec[CONF_TIMESTEP] if CONF_TIMESTEP in timeline_spec else "1d"
-        )
+        timeline_spec.setdefault(CONF_SCAN_INTERVAL,DEFAULT_SCAN_INTERVAL)
+        fields = timeline_spec.setdefault(CONF_FIELDS,[])
+        timeline_spec.setdefault(CONF_START_TIME,0)
+        observations = int(timeline_spec.get(CONF_FORECAST_OBSERVATIONS,1))
+        timestep = timeline_spec.setdefault(CONF_TIMESTEP,"1d")
 
         if timestep == 'current':
             observations = 1
         elif not re.match('^[0-9]+[mhd]$',timestep) :
             _LOGGER.error("Invalid timestep: %s", timestep)
             continue
+        
+        timeline_spec[CONF_FORECAST_OBSERVATIONS]=observations
 
-        exclude = (
-            timeline_spec[CONF_EXCLUDE_INTERVAL]
-            if CONF_EXCLUDE_INTERVAL in timeline_spec
-            else None
-        )
-        timeline_name = (
-            timeline_spec[CONF_NAME]
-            if CONF_NAME in timeline_spec
-            else None
-        )
+        timeline_spec.setdefault(CONF_EXCLUDE_INTERVAL,None)
+        timeline_name = timeline_spec.get(CONF_NAME)
+        timeline_friendly_name=sensor_friendly_name
+        if timeline_name not in [None, '']:
+          timeline_friendly_name+=" "+timeline_name
+        timeline_spec[CONF_NAME]=timeline_friendly_name
+        
         update = (
             timeline_spec[CONF_UPDATE][0] if CONF_UPDATE in timeline_spec else ATTR_AUTO
         )
+        timeline_spec[CONF_UPDATE]=update
 
         api_fields = {}
 
@@ -256,40 +232,40 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
                 ATTR_ICON: CLIMACELL_FIELDS[field][ATTR_ICON],
             }
 
+        timeline_spec[CONF_FIELDS]=api_fields
+
+        observations = timeline_spec[CONF_FORECAST_OBSERVATIONS]
         data_provider = ClimacellTimelineDataProvider(
             api_key=config.get(CONF_API_KEY),
-            latitude=latitude,
-            longitude=longitude,
-            interval=interval,
-            units=units,
-            fields=api_fields.keys(),
-            start_time=start_time,
+            latitude=config.get(CONF_LATITUDE),
+            longitude=config.get(CONF_LONGITUDE),
+            interval=timeline_spec[CONF_SCAN_INTERVAL],
+            units=config.get(CONF_UNITS),
+            fields=timeline_spec[CONF_FIELDS].keys(),
+            start_time=timeline_spec[CONF_START_TIME],
             observations=observations,
-            timesteps=timestep,
-            exceptions=exclude,
+            timesteps=timeline_spec[CONF_TIMESTEP],
+            exceptions=timeline_spec[CONF_EXCLUDE_INTERVAL],
         )
 
         data_provider.retrieve_update()
-        timeline_friendly_name=sensor_friendly_name
-        if timeline_name not in [None, '']:
-          timeline_friendly_name+=" "+timeline_name
 
-        for field in api_fields:
+        for field in timeline_spec[CONF_FIELDS]:
+            field_values = timeline_spec[CONF_FIELDS][field]
             for observation in range(0, observations):
                 sensors.append(
                     ClimacellTimelineSensor(
                         data_provider=data_provider,
                         field=field,
-                        timezone=timezone,
-                        condition_name=api_fields[field][ATTR_CONDITION],
-                        sensor_friendly_name=timeline_friendly_name
+                        condition_name=field_values[ATTR_CONDITION],
+                        sensor_friendly_name=timeline_spec[CONF_NAME]
                         + " "
-                        + api_fields[field][ATTR_NAME],
-                        timestep=timestep,
+                        + field_values[ATTR_NAME],
+                        timestep=timeline_spec[CONF_TIMESTEP],
                         observation=None if observations == 1 else observation,
-                        update=update,
-                        unit=api_fields[field][ATTR_UNIT_OF_MEASUREMENT],
-                        icon=api_fields[field][ATTR_ICON],
+                        update=timeline_spec[CONF_UPDATE],
+                        unit=field_values[ATTR_UNIT_OF_MEASUREMENT],
+                        icon=field_values[ATTR_ICON],
                     )
                 )
     add_entities(sensors, True)
@@ -297,13 +273,11 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     _LOGGER.info("__init__ setup_platform 'sensor' done for %s.", DOMAIN)
     return True
 
-
 class ClimacellTimelineSensor(Entity):
     def __init__(
         self,
         data_provider,
         field,
-        timezone,
         condition_name,
         sensor_friendly_name,
         timestep,
@@ -314,7 +288,6 @@ class ClimacellTimelineSensor(Entity):
     ):
         self.__data_provider = data_provider
         self.__field = field
-        self.__timezone = timezone
         self._condition_name = condition_name
         self._observation = observation
         self.__update = update
@@ -414,7 +387,7 @@ class ClimacellTimelineSensor(Entity):
             try:
                 dt = datetime.strptime(self._observation_time, "%Y-%m-%dT%H:%M:%S.%fZ")
                 utc = dt.replace(tzinfo=pytz.timezone("UTC"), microsecond=0, second=0)
-                local_dt = utc.astimezone(self.__timezone)
+                local_dt = utc.astimezone(self.hass.config.time_zone)
                 self._observation_time = local_dt.isoformat()
             except Exception as e:
                 pass
