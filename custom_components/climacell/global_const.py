@@ -1,6 +1,7 @@
 import voluptuous as vol
 from homeassistant.helpers import config_validation as cv
-
+ 
+from datetime import timedelta
 from homeassistant.components.weather import (
     ATTR_WEATHER_TEMPERATURE,
     ATTR_WEATHER_VISIBILITY,
@@ -17,6 +18,9 @@ from homeassistant.const import (
     SUN_EVENT_SUNSET,
     SUN_EVENT_SUNRISE,
 )
+
+DEFAULT_NAME = "Climacell"
+DEFAULT_SCAN_INTERVAL = timedelta(seconds=300)
 
 ATTRIBUTION = "Powered by Climacell"
 ATTR_OBSERVATION_TIME = "observation_time"

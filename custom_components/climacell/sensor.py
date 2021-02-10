@@ -2,11 +2,11 @@
 
 import logging
 import re
-
 import pytz
-import voluptuous as vol
+from datetime import datetime
 
-from datetime import timedelta, datetime
+from custom_components.climacell.global_const import *
+from custom_components.climacell.schema_const import SCHEMA_EXTENSION
 
 from homeassistant.components.google_assistant import CONF_API_KEY
 from homeassistant.const import (
@@ -20,74 +20,26 @@ from homeassistant.const import (
     ATTR_UNIT_OF_MEASUREMENT,
     ATTR_NAME,
 )
-from homeassistant.helpers import config_validation as cv
-from homeassistant.components.sensor import PLATFORM_SCHEMA
-from homeassistant.helpers.entity import Entity
-
 from custom_components.climacell.daily_api_const import (
     CONF_DAILY,
-    SCHEMA_DAILY_CONDITIONS,
 )
-from custom_components.climacell.global_const import *
 from custom_components.climacell.hourly_api_const import (
     CONF_HOURLY,
-    SCHEMA_HOURLY_CONDITIONS,
 )
 from custom_components.climacell.nowcast_api_const import (
-    SCHEMA_NOWCAST_CONDITIONS,
     CONF_NOWCAST,
 )
 from custom_components.climacell.realtime_api_const import (
     CONF_REALTIME,
-    SCHEMA_REALTIME_CONDITIONS,
 )
+
 from . import DOMAIN, ClimacellTimelineDataProvider
+from homeassistant.components.sensor import PLATFORM_SCHEMA
+from homeassistant.helpers.entity import Entity
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_NAME = "Climacell"
-
-DEFAULT_SCAN_INTERVAL = timedelta(seconds=300)
-
-MONITORED_CONDITIONS_SCHEMA = vol.Schema(
-    {
-        vol.Optional(CONF_REALTIME): vol.Schema(SCHEMA_REALTIME_CONDITIONS),
-        vol.Optional(CONF_DAILY): vol.Schema(SCHEMA_DAILY_CONDITIONS),
-        vol.Optional(CONF_HOURLY): vol.Schema(SCHEMA_HOURLY_CONDITIONS),
-        vol.Optional(CONF_NOWCAST): vol.Schema(SCHEMA_NOWCAST_CONDITIONS),
-    }
-)
-
-SCHEMA_TIMELINE = vol.Schema(
-    {
-        vol.Optional(CONF_NAME): cv.string,
-        vol.Required(CONF_FIELDS): vol.All(cv.ensure_list, [cv.string]),
-        vol.Optional(CONF_FORECAST_OBSERVATIONS): cv.positive_int,
-        vol.Optional(CONF_UPDATE): vol.All(cv.ensure_list, [vol.In(UPDATE_MODES)]),
-        vol.Optional(CONF_EXCLUDE_INTERVAL): vol.All(
-            cv.ensure_list, [vol.Schema(SCHEMA_EXCLUDE_INTERVAL)]
-        ),
-        vol.Optional(CONF_SCAN_INTERVAL): cv.time_period,
-        vol.Optional(CONF_TIMESTEP, default="1d"): cv.string,
-        vol.Optional(CONF_START_TIME, default=0): vol.Coerce(int),
-    }
-)
-
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
-    {
-        vol.Required(CONF_API_KEY): cv.string,
-        vol.Optional(CONF_LATITUDE): cv.latitude,
-        vol.Optional(CONF_LONGITUDE): cv.longitude,
-        vol.Optional(CONF_NAME, default=DEFAULT_NAME.lower()): cv.string,
-        vol.Optional(CONF_UNITS): vol.In(CONF_ALLOWED_UNITS + CONF_LEGACY_UNITS),
-        vol.Optional(CONF_MONITORED_CONDITIONS): vol.Schema(
-            MONITORED_CONDITIONS_SCHEMA
-        ),
-        vol.Optional(CONF_TIMELINES, default=[]): vol.All(
-            cv.ensure_list, [vol.Schema(SCHEMA_TIMELINE)]
-        ),
-    }
-)
+PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(SCHEMA_EXTENSION)
 
 def setup_platform(hass, config, add_entities, discovery_info=None):
     """Set up the Climacell sensor."""
@@ -97,7 +49,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
 
     _LOGGER.info("__init__ setup_platform 'sensor' start for %s.", DOMAIN)
 
-    sensor_friendly_name = config.setdefault(CONF_NAME, DEFAULT_NAME.lower())
+    config.setdefault(CONF_NAME, DEFAULT_NAME.lower())
     config.setdefault(CONF_LATITUDE, hass.config.latitude)
     config.setdefault(CONF_LONGITUDE, hass.config.longitude)
 
@@ -179,16 +131,15 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
         timeline_spec[CONF_FORECAST_OBSERVATIONS]=observations
 
         timeline_spec.setdefault(CONF_EXCLUDE_INTERVAL,None)
-        timeline_name = timeline_spec.get(CONF_NAME)
-        timeline_friendly_name=sensor_friendly_name
-        if timeline_name not in [None, '']:
-          timeline_friendly_name+=" "+timeline_name
-        timeline_spec[CONF_NAME]=timeline_friendly_name
+        if timeline_spec[CONF_NAME] not in [None, '']:
+          timeline_spec[CONF_NAME]=config.get(CONF_NAME) + timeline_spec[CONF_NAME]
+        else:
+          timeline_spec[CONF_NAME]=config.get(CONF_NAME)
         
-        update = (
-            timeline_spec[CONF_UPDATE][0] if CONF_UPDATE in timeline_spec else ATTR_AUTO
-        )
-        timeline_spec[CONF_UPDATE]=update
+        if CONF_UPDATE in timeline_spec:
+            timeline_spec[CONF_UPDATE]=timeline_spec[CONF_UPDATE][0]
+        else:
+            timeline_spec[CONF_UPDATE]=ATTR_AUTO
 
         api_fields = {}
 
